@@ -1,0 +1,875 @@
+<!DOCTYPE HTML>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width">
+    <title>Triangulación de Delaunay</title>
+    <script src="https://sagecell.sagemath.org/static/jquery.min.js"></script>
+    <script src="https://sagecell.sagemath.org/embedded_sagecell.js"></script>
+    <script>
+$(function () {
+    // Convertimos *cada* div de clase 'compute' en una celda de Sage
+    sagecell.makeSagecell({inputLocation: 'div.compute',
+    						template:       sagecell.templates.minimal,
+                           evalButtonText: 'Lanzar applet interactiva ahora'});
+});
+    </script>
+
+<style>
+  body {
+      font-family: Arial, sans-serif;
+      line-height: 1.6;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+      text-align: justify;
+  }
+  .sagecell_container {
+      width: 100%;
+      margin-bottom: 15px;
+  }
+</style>
+  </head>
+  <body style="width: 1000px;">
+
+
+    <h1>Triangulación de Delaunay: Explorando Algoritmos de Triangulación</h1>
+    <p><em>Por: Carlos Martínez Cuenca, Sergio Jiménez Romero, Jorge Vančo Sampedro</em></p>
+
+    <hr>
+
+    <h2>Introducción</h2>
+    <p>La triangulación de Delaunay es una técnica fundamental en geometría computacional que permite dividir un conjunto de puntos en triángulos de manera óptima. Desarrollada por Boris Delaunay en 1934, esta técnica es un concepto fundamental en la geometría computacional.</p>
+    
+    <h3>Criterio de Delaunay</h3>
+    <p>El criterio fundamental es que ningún punto del conjunto debe estar dentro del círculo circunscrito de cualquier triángulo. Esto garantiza que los triángulos sean lo más "equiláteros" posible, maximizando el ángulo mínimo de los triángulos.</p>
+
+    <h3>Algoritmos de Triangulación</h3>
+    <p>Presentamos dos enfoques algorítmicos para construir la triangulación de Delaunay:</p>
+
+    <h4>1. Algoritmo Incremental</h4>
+    <p>Método que añade puntos uno a uno, ajustando la triangulación en cada paso:
+    <ul>
+        <li>Comienza con un triángulo que contiene todos los puntos</li>
+        <li>Inserta puntos secuencialmente</li>
+        <li>Divide triángulos existentes si el nuevo punto no cumple el criterio de Delaunay</li>
+        <li>Realiza ajustes locales para mantener la optimalidad</li>
+        <li>Complejidad: O(n^2), aunque para la mayoría de distribuciones de puntos (que no presentan configuraciones degeneradas) presenta una complejidad de O(nlog n).</li>
+    </ul>
+    </p>
+
+    <h2>Instrucciones</h2>
+    <p>Para utilizar la aplicación interactiva de triangulación de Delaunay:</p>
+    
+    <ol>
+        <li>Genere un conjunto aleatorio con n puntos</li>
+        <li>Observe cómo se construye la triangulación paso a paso</li>
+    </ol>
+
+<div class="compute">
+<script type="text/x-sage">
+
+import matplotlib.pyplot as plt
+import numpy as np
+import random
+
+
+def dist(a, b):
+    """Eucledian distance between two points.
+
+    Args:
+        a (tuple): first point
+        b (tuple): second point
+
+    Returns:
+        float: distance between a and b
+    """
+    return ((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2) ** 0.5
+
+
+def signed_area(a, b, c):
+    """Calculate the signed area of the triangle formed by three points.
+
+    Args:
+        a (tuple): first point
+        b (tuple): second point
+        c (tuple): third point
+
+    Returns:
+        float: signed area of the triangle
+    """
+    return ((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])) / 2
+
+
+def in_circle(a, b, c, d):
+    """
+    Check if a point is inside the circle defined by three points.
+
+    Args:
+        a (tuple): first point
+        b (tuple): second point
+        c (tuple): third point
+        d (tuple): point to check
+
+    Raises:
+        ValueError: if a, b, and c are collinear
+
+    Returns:
+        bool: if d is inside the circle defined by a, b, and c
+    """
+    t = np.array([[1, 1, 1], [a[0], b[0], c[0]], [a[1], b[1], c[1]]])
+    dt = np.linalg.det(t)
+    if dt == 0:
+        raise ValueError("Points are collinear")
+    m = np.array(
+        [
+            [1, 1, 1, 1],
+            [a[0], b[0], c[0], d[0]],
+            [a[1], b[1], c[1], d[1]],
+            [
+                a[0] ** 2 + a[1] ** 2,
+                b[0] ** 2 + b[1] ** 2,
+                c[0] ** 2 + c[1] ** 2,
+                d[0] ** 2 + d[1] ** 2,
+            ],
+        ]
+    )
+    dm = np.linalg.det(m)
+    return dt * dm <= 1e-6
+
+
+def fix_orientation(T):
+    """
+    Since the triangles in the list are kept as sets for easier comparison, when converted back to lists
+    they may have a non-standard vertex order. This function fixes that to ensure delauney_in_triangle works correctly.
+
+    Args:
+        T (list): list of the vertices of a triangle
+
+    Returns:
+        list: the vertices of the triangle in the correct order
+    """
+    if signed_area(T[0], T[1], T[2]) < 0:
+        return (T[0], T[2], T[1])
+    return T
+
+
+def delaunay_in_triangle(T, p):
+    """
+    Check if a point is inside, outside, or on the edge of a triangle. The triangle must be oriented counter-clockwise.
+    We make the distinction between inside and on the edge because we need to add another triangle if the point is on the edge.
+
+    Args:
+        T (list): the vertices of the triangle
+        p (tuple): the point to check
+
+    Returns:
+        bool,bool: if the point is inside the triangle, if the point is on the edge of the triangle
+    """
+    T = fix_orientation(T)
+    for i in range(3):
+        area = signed_area(T[i - 1], T[i], p)
+        if in_segment(p, T[i - 1], T[i]):
+            return (True, True)
+        elif area < 0:
+            return (False, False)
+    return (True, False)
+
+
+# Carlos' function to test Delaunay criterion
+def test_delaunay(triangulacion, puntos):
+    """Test que verifica el criterio de Delaunay en cada triángulo de la triangulación."""
+    for tri in triangulacion:
+        p1, p2, p3 = tri[0], tri[1], tri[2]
+
+        # Comprobamos que no haya otro punto dentro del circuncírculo de este triángulo
+        for pto in puntos:
+            if pto not in [p1, p2, p3]:
+                if in_circle(p1, p2, p3, pto):
+                    print(
+                        f"Error: El punto {pto} está dentro del circuncírculo del triángulo formado por los puntos {p1}, {p2}, {p3}."
+                    )
+
+
+def in_segment(p, a, b):
+    """
+    Check if a point is inside the segment defined by two points.
+
+    Args:
+        p (tuple): the point to check
+        a (tuple): first point of the segment
+        b (tuple): second point of the segment
+
+    Returns:
+        bool: if the point is on the segment
+    """
+    return abs(float(dist(p, a)) + float(dist(p, b)) - float(dist(a, b))) < 1e-6
+
+
+def legalise_side(points, triangles, side, new_point):
+    """
+    Legalisation procedure for the sides of a triangle. If a point is inside the circumcircle of
+    a triangle, we make a flip with the side of the adjacent triangle.
+
+    Args:
+        points (list): list of all points up to the current point
+        triangles (list): triangles in the triangulation up to the current point
+        side (list): side of the triangle to legalise
+        new_point (tuple): new point added to the triangulation, used to check if it is inside the circumcircle
+    """
+    for point in points:
+        if (
+            in_circle(new_point, side[0], side[1], point)
+            and point
+            not in [
+                side[0],
+                side[1],
+                new_point,
+            ]
+            and set((side[0], side[1], point)) in triangles
+        ):
+            # Adding and removing these triangles is equivalent to flipping the side
+            triangles.append(set((side[0], point, new_point)))
+            triangles.append(set((side[1], point, new_point)))
+            triangles.remove(set((side[0], side[1], point)))
+            triangles.remove(set((side[0], side[1], new_point)))
+            # After making the flip we need to legalise other sides
+            legalise_side(points, triangles, (side[0], point), new_point)
+            legalise_side(points, triangles, (side[1], point), new_point)
+
+
+def delaunay_incremental(S):
+    """
+    Incremental Delaunay triangulation algorithm. We start with a triangle that contains all points and add points one by one.
+
+    Args:
+        S (list): list of points to triangulate
+
+    Returns:
+        list: list of sets of tuples, each set represents a triangle, each tuple is a vertex of the triangle
+    """
+    # Convert all points to tuples to be able to add them to sets
+    S = [tuple(p) for p in S]
+    # triangles is a list of sets of tuples, each set represents a triangle
+    triangles = []
+    # Create the initial triangle that contains all points
+    initial_triangle = create_initial_triangle(S)
+    triangles.append(set(initial_triangle))
+    triangulations = []
+    triangulations.append(
+        ([tuple(i) for i in triangles], S[:3] + list(initial_triangle))
+    )
+    for i, new_point in enumerate(S):
+        sides_to_legalise = []
+        triangles_to_remove = []
+        triangles_to_add = []
+        # This is used for cases when the point is on one of the sides for it to keep looking
+        seen_triangle = False
+        for triangle in triangles:
+            # We need to convert the set to a list to be able to access the elements
+            triangle = list(triangle)
+            in_triangle, on_edge = delaunay_in_triangle(triangle, new_point)
+            if in_triangle:
+                # We will need to remove the old triangle and add three new ones (equivalent to adding three edges)
+                triangles_to_remove.append(set(triangle))
+                for j in range(3):
+                    # If the point is on an edge, we don't add the triangle that contains that edge (it's a segment)
+                    if not in_segment(new_point, triangle[j - 1], triangle[j]):
+                        triangles_to_add.append(
+                            set((triangle[j - 1], triangle[j], new_point))
+                        )
+                        # We also need to legalise the the edges of the old triangle
+                        sides_to_legalise.append((triangle[j - 1], triangle[j]))
+                if not on_edge or seen_triangle:
+                    break
+                else:
+                    seen_triangle = True
+        # We remove the old triangles and add the new ones
+        for triangle in triangles_to_remove:
+            triangles.remove(triangle)
+        triangles.extend(triangles_to_add)
+        # We legalise the sides of the triangles
+        for side in sides_to_legalise:
+            legalise_side(S[:i] + list(initial_triangle), triangles, side, new_point)
+        # We test the Delaunay criterion
+        # NOTE: This gives a false positive for when there are points that are just on the circumcircle of another 3 points
+        # test_delaunay([list(i) for i in triangles], S[: i + 1])
+        triangulations.append(
+            ([tuple(i) for i in triangles], S[: i + 1] + list(initial_triangle))
+        )
+        # OPTIONAL: Uncomment to visualise the triangulation at each step
+        # visualizar_triangulacion(
+        #     [list(i) for i in triangles], S[: i + 1] + list(initial_triangle)
+        # )
+    # We remove the initial triangle
+    # We need to reverse the list of triangles to not skip any when removing
+    for triangle in reversed(triangles):
+        if triangle.intersection(set(initial_triangle)):
+            triangles.remove(triangle)
+    triangulations.append(([tuple(i) for i in triangles], S))
+    return triangulations
+
+
+def create_initial_triangle(S, margin=1):
+    """
+    Create a triangle that contains all points in S. We take the minimum x and y coordinates and the maximum coordinate in
+    the direction of the (1,1) vector. We then find the vertices of the triangle determined by these two points. We create it by
+    making a vertical and horizontal line from (x_min, y_min) and finding the intersection with the line that goes through (max_rx, max_ry)
+    and has (1,1) as a normal vector.
+
+    Args:
+        S (list): the list of points
+        margin (int, optional): additional margin to make the triangle slightly larger. Defaults to 1.
+
+    Returns:
+        tuple: the vertices of the initial triangle
+    """
+    min_x = min(S, key=lambda p: p[0])[0]
+    min_y = min(S, key=lambda p: p[1])[1]
+    max_rx = max(S, key=lambda p: p[0] + p[1])[0]
+    max_ry = max(S, key=lambda p: p[0] + p[1])[1]
+
+    # Create a triangle that contains all points in S
+    p1 = (min_x - margin, min_y - margin)
+    p2 = (max_rx + max_ry - min_y + 2 * margin, min_y - margin)
+    p3 = (min_x - margin, max_ry + max_rx - min_x + 2 * margin)
+
+    return (p1, p2, p3)
+
+
+# Function used by carlos to make the visualisation
+def calcular_circuncentro(tri):
+    # Tomamos los tres vértices del triángulo
+    A, B, C = tri
+
+    # Calcular las longitudes de los lados
+    AB = np.linalg.norm(B - A)
+    BC = np.linalg.norm(C - B)
+    CA = np.linalg.norm(A - C)
+
+    # Usamos la fórmula de las coordenadas del circuncentro (intersección de mediatrices)
+    # Se asume que A, B y C son arrays numpy de forma (2,)
+    D = 2 * (A[0] * (B[1] - C[1]) + B[0] * (C[1] - A[1]) + C[0] * (A[1] - B[1]))
+
+    ux = (
+        (A[0] ** 2 + A[1] ** 2) * (B[1] - C[1])
+        + (B[0] ** 2 + B[1] ** 2) * (C[1] - A[1])
+        + (C[0] ** 2 + C[1] ** 2) * (A[1] - B[1])
+    ) / D
+    uy = (
+        (A[0] ** 2 + A[1] ** 2) * (C[0] - B[0])
+        + (B[0] ** 2 + B[1] ** 2) * (A[0] - C[0])
+        + (C[0] ** 2 + C[1] ** 2) * (B[0] - A[0])
+    ) / D
+
+    return np.array([ux, uy])
+
+
+# Function used by carlos to make the visualisation
+def visualizar_triangulacion(triangulacion, puntos, S):
+    plt.figure()
+    puntos = np.array(puntos)
+    point_to_index = {tuple(p): i for i, p in enumerate(puntos)}
+    # Convert triangles from coordinates to indices
+    triangles = []
+    for triangle in triangulacion:
+        indices = [point_to_index[tuple(vertex)] for vertex in triangle]
+        triangles.append(indices)
+    triangulacion = np.array(triangles)
+    plt.triplot(puntos[:, 0], puntos[:, 1], triangulacion, color="gray")
+  
+    # Dibujar los puntos
+    plt.plot(puntos[:, 0], puntos[:, 1], "o", color="red")
+    S = np.array(S)
+    plt.plot(S[:, 0], S[:, 1], "o", color="blue")
+
+    # Calcular y dibujar el circuncentro y el círculo circunscrito para cada triángulo
+    for t in triangulacion:
+        # Vértices del triángulo
+        A = puntos[t[0]]
+        B = puntos[t[1]]
+        C = puntos[t[2]]
+
+        # Calcular el circuncentro
+        circuncentro = calcular_circuncentro(np.array([A, B, C]))
+
+        # Calcular el radio del círculo circunscrito (distancia desde el circuncentro a uno de los vértices)
+        radio = np.linalg.norm(circuncentro - A)
+
+        # Dibujar el circuncentro
+        plt.plot(circuncentro[0], circuncentro[1], "go")  # Circuncentro en verde
+
+        # Dibujar el círculo circunscrito
+        circunferencia = plt.Circle(
+            circuncentro, radio, color="blue", fill=False, linestyle="dotted"
+        )
+        plt.gca().add_artist(circunferencia)
+
+    plt.axis("equal")
+    plt.show()
+
+@interact
+def delaunay_show(puntos = slider[3..25]):
+    S = [(random.random(), random.random()) for _ in range(puntos)]
+    T = delaunay_incremental(S)
+    T.append((T[-1][0], S))
+    @interact
+    def show(step = slider(0, len(T) - 1, 1, 0)):
+      visualizar_triangulacion(T[step][0], T[step][1], S)
+         
+##
+
+</script>
+</div>
+
+<hr>
+
+<h4>2. Algoritmo de Flips</h4>
+    <p>Técnica basada en transformaciones locales de la triangulación:
+    <ul>
+        <li>Genera una triangulación inicial (por ejemplo, triangulación de todos los puntos)</li>
+        <li>Identifica triángulos que no cumplen el criterio de Delaunay</li>
+        <li>Realiza "flips" (intercambios de diagonales) para corregir la triangulación</li>
+        <li>Repite hasta que todos los triángulos cumplan el criterio</li>
+        <li>Complejidad: O(n^2).</li>
+    </ul>
+    </p>
+
+    <h2>Instrucciones</h2>
+    <p>Para utilizar la aplicación interactiva de triangulación de Delaunay:</p>
+    
+    <ol>
+        <li>Genere un conjunto aleatorio con n puntos</li>
+        <li>Observe cómo se construye la triangulación paso a paso</li>
+    </ol>
+
+<div class="compute">
+<script type="text/x-sage">
+import numpy as np
+import matplotlib.pyplot as plt
+import random
+from scipy.spatial import ConvexHull
+# Calculate the Euclidean distance between two points p and q.
+def dist(p, q):
+    return sqrt((p[0] - q[0]) ** 2 + (p[1] - q[1]) ** 2)
+
+# Compute the signed area of a triangle formed by points a, b, and c.
+# The result is positive if the triangle is counter-clockwise, negative if clockwise, and zero if collinear.
+def signed_area(a, b, c):
+    return ((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])) / 2
+
+# Check if point d lies inside the circumcircle of the triangle formed by points a, b, and c.
+# Returns True if point d is inside the circumcircle.
+def in_circle(a, b, c, d):
+
+    t = np.array([[1, 1, 1], [a[0], b[0], c[0]], [a[1], b[1], c[1]]])
+    dt = np.linalg.det(t)
+    if dt == 0:
+        raise ValueError("Points are collinear")
+    m = np.array(
+        [
+            [1, 1, 1, 1],
+            [a[0], b[0], c[0], d[0]],
+            [a[1], b[1], c[1], d[1]],
+            [
+                a[0] ** 2 + a[1] ** 2,
+                b[0] ** 2 + b[1] ** 2,
+                c[0] ** 2 + c[1] ** 2,
+                d[0] ** 2 + d[1] ** 2,
+            ],
+        ]
+    )
+    dm = np.linalg.det(m)
+
+    return dt * dm < -0.001
+
+
+def angular_order(points, center):
+    """
+    Sorts a set of points in angular order around a given center point.
+
+    This function partitions the points into four groups based on their 
+    relative position to the center point: right (east), left (west), 
+    above (north), and below (south). Each group is then sorted according 
+    to their angular position with respect to the center and, in case of ties, 
+    by their distance from the center.
+    """
+    right = []    # Points to the right of the center
+    left = []     # Points to the left of the center
+    above = []    # Points directly above the center
+    below = []    # Points directly below the center
+
+    # Partition points into four groups based on their position relative to the center.
+    for point in points:
+        if point[0] > center[0]:
+            right.append(point)
+        elif point[0] < center[0]:
+            left.append(point)
+        elif point[0] == center[0] and point[1] > center[1]:
+            above.append(point)
+        elif point[0] == center[0] and point[1] < center[1]:
+            below.append(point)
+
+    # Sort each group:
+    # - By angular position relative to the center (calculated using slope).
+    # - By distance to the center in case of angular ties.
+    right = sorted(right, key=lambda x: [(x[1] - center[1]) / (x[0] - center[0]), dist(x, center)])
+    left = sorted(left, key=lambda x: [(x[1] - center[1]) / (x[0] - center[0]), dist(x, center)])
+    above = sorted(above)  # Points directly above are sorted by y-coordinate.
+    below = sorted(below)  # Points directly below are sorted by y-coordinate.
+
+    # Combine sorted groups into the final angular order.
+    # If the center point is in the input set, include it as the first element.
+    if center in points:
+        return [center] + right + above + left + below
+    else:
+        return right + above + left + below
+
+def get_opposite_vertex(triangle, edge):
+    """
+    Finds the vertex in a triangle that is not part of a given edge.
+    """
+    for vertex in triangle:
+        # Check if the vertex is not one of the points in the edge.
+        if vertex != edge[0] and vertex != edge[1]:
+            return vertex
+
+
+def flips(edge_1, edge_2, opposite_point1, opposite_point2):
+    """
+    Performs a flip operation in a triangulation and returns the two new triangles.
+
+    A "flip" replaces two adjacent triangles sharing a common edge with two new triangles 
+    that share a new edge formed by connecting the opposite vertices of the original triangles.
+    """
+    # Create the two new triangles after the flip
+    triangle_1 = [edge_1, opposite_point1, opposite_point2]
+    triangle_2 = [edge_2, opposite_point1, opposite_point2]
+
+    return triangle_1, triangle_2
+
+
+def graham_triangulation(points):
+    """
+    Constructs a triangulation of a set of points using the Graham scan algorithm.
+
+    This function computes a triangulation by sorting points in angular order 
+    around the leftmost point (or the lowest point in case of ties) and 
+    iteratively building triangles based on their orientation.
+    """
+    
+    triangulation = []  # List to store the resulting triangles.
+
+    # If there are fewer than three points, return the points themselves as a single "triangle."
+    if len(points) < 3:
+        return [points]
+
+    # Find the leftmost (or lowest) point to serve as the reference.
+    origin = min(points)
+
+    # Sort points in angular order around the reference point.
+    sorted_points = angular_order(points, origin)
+
+    # Create initial set of triangles from sorted points.
+    for i in range(1, len(sorted_points) - 1):
+        triangulation.append([sorted_points[0], sorted_points[i], sorted_points[i + 1]])
+
+    # Refine the triangulation by checking for counter-clockwise orientation.
+    i = 1
+    while sorted_points[i] != sorted_points[-1]:
+        if signed_area(sorted_points[i - 1], sorted_points[i], sorted_points[(i + 1) % len(sorted_points)]) < 0:
+            # If the area is negative, points are not counter-clockwise; add a triangle and remove the middle point.
+            triangulation.append([sorted_points[i], sorted_points[(i + 1) % len(sorted_points)], sorted_points[i - 1]])
+            sorted_points.pop(i)
+
+            # Move back one step if possible.
+            if i > 0:
+                i -= 1
+        else:
+            # Points are counter-clockwise; continue to the next set.
+            i += 1
+
+    return triangulation
+
+def check_points_aligned(P, i):
+    """
+    Adjusts the points in a point cloud to ensure no three points are collinear.
+
+    Parameters:
+    ----------
+    P : list of lists
+        A point cloud represented as a list of points, where each point is [x, y].
+    i : int
+        Index of the point with the smallest x-coordinate in the point cloud.
+
+    Returns:
+    -------
+    list of lists
+        The modified point cloud where no three points are collinear.
+    
+    Notes:
+    ------
+    - The function checks if any three points, including the point at index `i`,
+      are collinear by calculating the signed area of the triangle they form.
+    - If three points are collinear, a small random perturbation is added to the 
+      coordinates of the third point to break collinearity.
+    - The signed area of a triangle formed by points A, B, and C is zero if the 
+      points are collinear.
+
+    Example:
+    --------
+    >>> P = [[0, 0], [1, 1], [2, 2], [3, 3]]
+    >>> i = 0  # Index of the point with the smallest x-coordinate
+    >>> check_points_aligned(P, i)
+    [[0, 0], [1, 1], [2.0002, 2.0003], [3.0001, 3.0004]]
+    """
+    
+    n = len(P)
+    
+    for j in range(n):
+        if j != i:
+            for k in range(n):
+                if k != i and k != j: 
+                    if signed_area(P[i], P[j], P[k]) == 0:
+                        print(f"{P[i]}, {P[j]}, {P[k]} are collinear.")
+                        P[k][0] = P[k][0] + random.random() * 0.001
+                        P[k][1] = P[k][1] + random.random() * 0.001
+                        
+    return P
+def delaunay_triangulation_flips(points):
+    """
+    Computes a Delaunay triangulation of a set of 2D points using an iterative refinement process.
+
+    The function starts with an initial triangulation obtained from the Graham scan and 
+    incrementally refines it by performing edge flips to ensure the Delaunay condition is satisfied.
+
+    Args:
+        points (list of tuples): A list of 2D points represented as (x, y).
+
+    Returns:
+        list of lists: A list of triangles, where each triangle is represented as a list of three vertices (x, y).
+
+    Example:
+        points = [(0, 0), (1, 0), (0, 1), (1, 1)]
+        triangulation(points)
+        # Returns a Delaunay triangulation, e.g.:
+        # [[(0, 0), (1, 0), (0, 1)], [(1, 0), (1, 1), (0, 1)]]
+    """
+    
+    # Find the index of the point with the smallest x-coordinate (used as the reference point for Graham's triangulation)
+    index_xmin = points.index(min(points))
+    
+    # Ensure that no two other points are collinear with the reference point to avoid issues during triangulation
+    points = check_points_aligned(points, index_xmin)
+    
+    # Compute the convex hull of the points (used to identify boundary edges).
+    convex_hull = ConvexHull(points).simplices.tolist()
+
+    # Start with an initial triangulation using Graham's method.
+    previous_triangulation = graham_triangulation(points)
+
+    # Flag to track if any changes were made during the current iteration.
+    change_occurred = True
+    triangulations = [previous_triangulation]
+    while change_occurred:
+        change_occurred = False
+        current_triangulation = previous_triangulation.copy()
+
+        # Iterate over each triangle in the triangulation.
+        for triangle in previous_triangulation:
+            # Check each edge of the triangle (3 edges total).
+            for i in range(-1, 2):
+                # Skip edges that are part of the convex hull.
+                if triangle[i] in convex_hull and triangle[i + 1] in convex_hull:
+                    pass
+                else:
+                    # Look for a neighboring triangle that shares the current edge.
+                    for other_triangle in previous_triangulation:
+                        if triangle != other_triangle and triangle[i] in other_triangle and triangle[i + 1] in other_triangle:
+                            # Find the opposite vertices in both triangles.
+                            opposite_vertex1 = get_opposite_vertex(triangle, [triangle[i], triangle[i + 1]])
+                            opposite_vertex2 = get_opposite_vertex(other_triangle, [triangle[i], triangle[i + 1]])
+
+                            # Check if the Delaunay condition is violated.
+                            if in_circle(triangle[i], triangle[i + 1], opposite_vertex1, opposite_vertex2):
+                                # Perform an edge flip.
+                                new_triangle1, new_triangle2 = flips(triangle[i], triangle[i + 1], opposite_vertex1, opposite_vertex2)
+                                change_occurred = True
+
+                                # Remove the original triangles from the triangulation.
+                                current_triangulation.pop(current_triangulation.index(triangle))
+                                current_triangulation.pop(current_triangulation.index(other_triangle))
+
+                                # Add the new flipped triangles to the triangulation.
+                                current_triangulation.append(new_triangle1)
+                                current_triangulation.append(new_triangle2)
+
+                        # If a change occurred, stop processing further edges.
+                        if change_occurred:
+                            break
+
+                # If a change occurred, stop processing further triangles.
+                if change_occurred:
+                    break
+
+            # If a change occurred, stop the loop and restart the process.
+            if change_occurred:
+                break
+
+        # Update the triangulation for the next iteration.
+        previous_triangulation = current_triangulation.copy()
+        triangulations.append(current_triangulation.copy())
+    return triangulations
+
+def test_delaunay(triangulation, points):
+    """
+    Test that verifies the Delaunay condition for each triangle in the triangulation.
+
+    This function checks that no point from the set of points lies inside the circumcircle
+    of any triangle in the triangulation. If a violation of the Delaunay condition is found,
+    it reports the problematic point and triangle.
+
+    Args:
+        triangulation (list of lists): A list of triangles, where each triangle is represented
+                                       as a list of three vertices (x, y).
+        points (list of tuples): A list of 2D points represented as (x, y).
+
+    Example:
+        points = [(0, 0), (1, 0), (0, 1), (1, 1), (0.5, 0.5)]
+        triangulation = [[(0, 0), (1, 0), (0, 1)], [(1, 0), (1, 1), (0, 1)]]
+        test_delaunay(triangulation, points)
+        # Prints any Delaunay violations.
+    """
+    for triangle in triangulation:
+        p1, p2, p3 = triangle[0], triangle[1], triangle[2]
+
+        # Check if any other point lies inside the circumcircle of the triangle.
+        for point in points:
+            if point not in [p1, p2, p3]:
+                if in_circle(p1, p2, p3, point):
+                    print(
+                        f"Error: Point {point} lies inside the circumcircle of the "
+                        f"triangle formed by points {p1}, {p2}, {p3}."
+                    )
+
+def visualize_triangulation(triangulation, points):
+    """
+    Visualizes a Delaunay triangulation using Matplotlib.
+
+    This function takes a set of points and their corresponding triangulation
+    and plots the triangles and points on a 2D plane.
+
+    Args:
+        triangulation (list of lists): A list of triangles, where each triangle is represented
+                                       as a list of three vertices (x, y).
+        points (list of tuples): A list of 2D points represented as (x, y).
+
+    Example:
+        points = [(0, 0), (1, 0), (0, 1), (1, 1), (0.5, 0.5)]
+        triangulation = [[(0, 0), (1, 0), (0, 1)], [(1, 0), (1, 1), (0, 1)]]
+        visualize_triangulation(triangulation, points)
+    """
+    fig, ax = plt.subplots()
+
+    # Draw the triangles
+    for triangle in triangulation:
+        # Create a closed polygon for each triangle
+        x = [p[0] for p in triangle]
+        y = [p[1] for p in triangle]
+        x.append(triangle[0][0])  # Close the triangle
+        y.append(triangle[0][1])  # Close the triangle
+        ax.plot(x, y, 'b-')  # Draw triangle edges in blue
+
+    # Draw the points
+    x_points = [p[0] for p in points]
+    y_points = [p[1] for p in points]
+    ax.scatter(x_points, y_points, color='red', zorder=5)  # Plot points in red
+
+    # Configure the axes
+    ax.set_aspect('equal', adjustable='datalim')
+    plt.grid(True)
+    plt.title("Visualization of Delaunay Triangulation")
+    plt.show()
+
+
+
+@interact
+def delaunay_show(puntos = slider[3..25]):
+    points = [[random.random(), random.random()] for _ in range(puntos)]
+    triangulation = delaunay_triangulation_flips(points)
+    if len(triangulation) > 2:
+      @interact
+      def show(n = slider[1..len(triangulation)-1]):
+          
+          visualize_triangulation(triangulation[n], points)
+    else:
+      visualize_triangulation(triangulation[0], points)
+    
+</script>
+</div>
+
+<h2>Discusión y aplicaciones</h2>
+
+La triangulación de Delaunay es una técnica fundamental en el campo de la geometría computacional y tiene diversas aplicaciones en áreas como la visualización de datos, la simulación física y la computación gráfica. Algunos de los usos más comunes de la triangulación de Delaunay son:
+
+<ul>
+  <li>
+      <strong>Gráficos por computadora:</strong> 
+      La triangulación de Delaunay se utiliza para modelar superficies tridimensionales a partir de puntos de muestreo en aplicaciones como la animación, el diseño asistido por computadora (CAD) y los videojuegos. Permite dividir un conjunto de puntos en triángulos de forma óptima, lo que facilita el renderizado eficiente de objetos 3D y la creación de texturas suaves y continuas.
+  </li>
+  <li>
+      <strong>Análisis de terrenos y SIG (Sistemas de Información Geográfica):</strong> 
+      En la representación de terrenos, la triangulación se emplea para crear redes de triángulos irregulares (TIN, por sus siglas en inglés) que modelan la superficie del terreno de forma precisa. Esta técnica se utiliza en software SIG para analizar elevaciones, calcular pendientes y modelar cuencas hidrográficas.
+  </li>
+  <li>
+      <strong>Interpolación y aproximación de funciones:</strong> 
+      La triangulación de Delaunay sirve como base para realizar interpolaciones en espacios multidimensionales. Por ejemplo, permite aproximar valores en puntos desconocidos basándose en datos muestreados, lo cual es útil en ciencias atmosféricas, predicción meteorológica y estudios de geología.
+  </li>
+  <li>
+      <strong>Simulación física:</strong> 
+      Se utiliza en métodos de elementos finitos (FEM, por sus siglas en inglés) para modelar fenómenos físicos como deformaciones estructurales, flujos de fluidos y transferencias de calor. La triangulación crea mallas estructuradas con triángulos de buena calidad geométrica, lo que mejora la precisión y la estabilidad de las simulaciones.
+  </li>
+  <li>
+      <strong>Reconstrucción de formas:</strong> 
+      En aplicaciones de reconstrucción tridimensional, como la impresión 3D o el escaneo láser, la triangulación de Delaunay ayuda a conectar puntos en una nube de datos para formar una superficie coherente. Esto es esencial para recuperar modelos de objetos físicos de manera precisa y eficiente.
+  </li>
+</ul>
+
+Esta triangulación
+<ul>
+  <li>
+      <strong>Ventajas:</strong>
+      <ul>
+          <li>
+              <strong>Garantiza triángulos con formas más equilibradas:</strong> 
+              La triangulación de Delaunay minimiza la aparición de triángulos con ángulos muy agudos, lo que resulta en mallas más estables y útiles para cálculos geométricos, simulaciones físicas y representación gráfica. Esto es importante porque las mallas con triángulos de formas desproporcionadas tienden a producir errores numéricos y resultados menos precisos.
+          </li>
+          <li>
+              <strong>Computacionalmente eficiente y adaptable a varias dimensiones:</strong> 
+              Aunque calcular la triangulación puede ser complejo, los algoritmos modernos la resuelven de manera eficiente para conjuntos de puntos bidimensionales y tridimensionales. Esto la hace ideal para problemas de modelado espacial y análisis de datos en múltiples disciplinas, desde el diseño asistido por computadora hasta la geología.
+          </li>
+      </ul>
+  </li>
+  <li>
+      <strong>Desafíos:</strong>
+      <ul>
+          <li>
+              <strong>Complejidad de implementación en 3D o dimensiones superiores:</strong> 
+              Aunque la triangulación en 2D es relativamente directa, extender los algoritmos a dimensiones superiores requiere una lógica matemática más avanzada y estructuras de datos complejas. Esto limita su aplicabilidad para quienes no disponen de las herramientas o el conocimiento técnico adecuado.
+          </li>
+          <li>
+              <strong>Computacionalmente costosa en grandes conjuntos de datos:</strong> 
+              Cuando se trabaja con millones de puntos, la triangulación puede requerir recursos significativos de memoria y procesamiento. Sin optimizaciones como algoritmos especializados o paralelización, esto puede hacer inviable su uso en sistemas con restricciones computacionales.
+          </li>
+      </ul>
+  </li>
+</ul>
+
+<p>
+  En resumen, la triangulación de Delaunay es una herramienta versátil y poderosa para resolver problemas geométricos complejos. Su importancia radica en su capacidad para generar representaciones eficientes y precisas de datos espaciales, lo que la hace esencial en múltiples campos de la ciencia y la ingeniería.
+</p>
+
+<hr>
+Modificado por última vez:  4 de diciembre de 2024
+</body>
+<script>'undefined'=== typeof _trfq || (window._trfq = []);'undefined'=== typeof _trfd && (window._trfd=[]),_trfd.push({'tccl.baseHost':'secureserver.net'},{'ap':'cpsh-oh'},{'server':'p3plzcpnl502892'},{'dcenter':'p3'},{'cp_id':'2342172'},{'cp_cache':''},{'cp_cl':'6'}) // Monitoring performance to make your website faster. If you want to opt-out, please contact web hosting support.</script><script src='https://img1.wsimg.com/traffic-assets/js/tccl.min.js'></script></html>
