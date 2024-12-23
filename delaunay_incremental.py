@@ -104,7 +104,6 @@ def delaunay_in_triangle(T, p):
     return (True, False)
 
 
-# Carlos' function to test Delaunay criterion
 def test_delaunay(triangulacion, puntos):
     """Test que verifica el criterio de Delaunay en cada triángulo de la triangulación."""
     for tri in triangulacion:
@@ -265,7 +264,6 @@ def create_initial_triangle(S, margin=1):
     return (p1, p2, p3)
 
 
-# Function used by carlos to make the visualisation
 def calcular_circuncentro(tri):
     # Tomamos los tres vértices del triángulo
     A, B, C = tri
@@ -293,7 +291,6 @@ def calcular_circuncentro(tri):
     return np.array([ux, uy])
 
 
-# Function used by carlos to make the visualisation
 def visualizar_triangulacion(triangulacion, puntos):
     puntos = np.array(puntos)
     point_to_index = {tuple(p): i for i, p in enumerate(puntos)}
